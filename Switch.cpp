@@ -33,4 +33,5 @@ uint32_t Switch_In(void){
     input += (GPIOB->DIN31_0 & upSwitch)?2:0;
     input += (GPIOA->DIN31_0 & leftSwitch)?4:0;
     input += (GPIOA->DIN31_0 & downSwitch)?8:0;
+    return input;
 }
