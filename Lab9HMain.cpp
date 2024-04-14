@@ -40,6 +40,8 @@ uint32_t Random32(void){
 uint32_t Random(uint32_t n){
   return (Random32()>>16)%n;
 }
+int max(int a, int b) {return a>b?a:b;}
+int min(int a, int b) {return a<b?a:b;}
 
 SlidePot Sensor(1500,0); // copy calibration from Lab 7
 
@@ -75,7 +77,7 @@ void DrawRoad() {
 // known to work
 // color 0 = red, 1 = white
 void DrawSpike(int x, int y, int color) {
-    int height = y/7 + 1; // divisor is arbitrary. controls size of spike.
+    int height = y/6 + 1; // divisor is arbitrary. controls size of spike.
     for (int i = y ; i < y+height * 1.4 ; i++) {
         for (int j = x-(i-y)/2 ; j <= x+(i-y)/2 ; j++) {
             if ((j-x)*(j-x) + (i-y-height/2)*(i-y-height/2) > height*height/2 && i >= y+height) continue;
@@ -88,17 +90,12 @@ void DrawSpike(int x, int y, int color) {
                     ST7735_DrawPixel(j, i, ST7735_LIGHTRED);
                 }
             } else {
+                if (i-y > 5 && abs(j-x) < (i-y-5)/2) continue; // an attempt to refresh faster
                 ST7735_DrawPixel(j, i, ST7735_WHITE);
             }
 
         }
     }
-    // an attempt to make the spikes rounder
-//    if (color == 0) {
-//        ST7735_Line(x-height/2.7+1, y+height, x+height/2.7, y+height, ST7735_LIGHTRED);
-//    } else {
-//        ST7735_Line(x-height/2.7+1, y+height, x+height/2.7, y+height, ST7735_WHITE);
-//    }
 
 }
 
@@ -434,6 +431,7 @@ int main(void){ // final main
       switchLanguage();
   }
 
+  // PHASE 1
   phase = 1;
   LED_Off(0); LED_Off(1); LED_Off(2);
 
@@ -455,12 +453,15 @@ int main(void){ // final main
       // over the white bitmap rather than redrawing the large road actually i don't like this idea!
       // another idea: same as above but limit the white background to ±5 pixels on each side. Limit
       // the player to move max 5 pixels per frame, so the 5 pixel margin is sufficient.
-      if (abs(prevplayerX - playerX) >= 1) {
-          ST7735_FillRect(12, 121, 104, 40, 0xFFFF);
+      if (prevplayerX != playerX) {
+          int vel = abs(prevplayerX - playerX)+3;
+          //ST7735_FillRect(12, 121, 104, 34, 0xFFFF); // problematic tbh
+          if (playerX > prevplayerX) ST7735_FillRect(max(12,playerX-vel), 121, vel, 34, 0xFFFF);
+          if (playerX < prevplayerX) ST7735_FillRect(playerX+15, 121, min(vel,99-playerX), 34, 0xFFFF);
           ST7735_DrawBitmap(playerX, 150, AlienMiddle, 15, 30);
       }
 
-      // draw score TODO: make score increase every 10 frames not 1 using SysTick
+      // draw score TODO: make score increase every 5 frames not 1 using SysTick
       score += 10;
       ST7735_SetCursor(0,0);
       drawScore(score);
