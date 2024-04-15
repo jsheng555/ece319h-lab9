@@ -22,32 +22,45 @@
 
 
 void SysTick_IntArm(uint32_t period, uint32_t priority){
-  // write this
-
+    // write this
+    SysTick->CTRL = 0;         // disable SysTick during setup
+    SysTick->LOAD = period-1;  // reload value
+    SysTick->VAL = 0;          // any write to current clears it
+    SCB->SHP[1] = (SCB->SHP[1]&(~0xC0000000))|(priority << 29); // priority 2 // 30??
+    SysTick->CTRL = 0x07;      // enable SysTick with core clock and interrupts
 }
 // initialize a 11kHz SysTick, however no sound should be started
 // initialize any global variables
 // Initialize the 5 bit DAC
+uint8_t soundIndex = 0;
+int soundSize = 0;
+int i = 0;
 void Sound_Init(void){
 // write this (INCOMPLETE)
 
     // initialize an 11kHz SysTick
-
+    SysTick_IntArm(17273, 2);
     // global variables?
 
 
     // initialize 5 bit DAC
-    GPIOB->DOE31_0 |= (0b11111);
-    IOMUX->SECCFG.PINCM[PB0INDEX] = 0x81;
-    IOMUX->SECCFG.PINCM[PB1INDEX] = 0x81;
-    IOMUX->SECCFG.PINCM[PB2INDEX] = 0x81;
-    IOMUX->SECCFG.PINCM[PB3INDEX] = 0x81;
-    IOMUX->SECCFG.PINCM[PB4INDEX] = 0x81;
+    DAC5_Init();
 }
 extern "C" void SysTick_Handler(void);
 void SysTick_Handler(void){ // called at 11 kHz
   // output one value to DAC if a sound is active
-   
+    if (i > soundSize) {
+        SysTick->LOAD = 0;
+    }
+    switch(soundIndex)
+    {
+    case 0:
+        DAC5_Out(button[i++]);
+        break;
+    case 1:
+        DAC5_Out(jump[i++]);
+        break;
+    }
 }
 
 //******* Sound_Start ************
@@ -60,16 +73,20 @@ void SysTick_Handler(void){ // called at 11 kHz
 //        count is the length of the array
 // Output: none
 // special cases: as you wish to implement
-void Sound_Start(const uint8_t *pt, uint32_t count){
+void Sound_Start2(const uint8_t pt, uint32_t count){
 // write this
-  
+    SysTick->LOAD = 7256-1;
+    i = 0;
+    soundIndex = pt;
+    soundSize = count;
 }
-void Sound_Shoot(void){
+void Sound_Button(void){
 // write this
-  
+    Sound_Start2(0, 5472);
 }
-void Sound_Killed(void){
+void Sound_Jump(void){
 // write this
+    Sound_Start2(1, 3168);
   
 }
 void Sound_Explosion(void){

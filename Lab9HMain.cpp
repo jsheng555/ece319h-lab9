@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cmath>
 #include <ti/devices/msp/msp.h>
 #include "../inc/ST7735.h"
 #include "../inc/Clock.h"
@@ -19,6 +20,7 @@
 #include "LED.h"
 #include "Switch.h"
 #include "Sound.h"
+#include "DrawSprites.h"
 #include "images/images.h"
 extern "C" void __disable_irq(void);
 extern "C" void __enable_irq(void);
@@ -47,63 +49,15 @@ SlidePot Sensor(1500,0); // copy calibration from Lab 7
 
 int phase = 0; // 0 = welcome, 1 = gameplay, 2 = lose
 
-void DrawStars() {
-    if (phase == 0) {
-        for (int i = 0 ; i < 22 ; i++) {
-            ST7735_DrawPixel(Random32()%64, Random32()%110 + 50, ST7735_Color565(255,255,255));
-        }
-        for (int i = 0 ; i < 22 ; i++) {
-            ST7735_DrawPixel((Random32()%64)+64, Random32()%110 + 50, ST7735_Color565(255,255,255));
-        }
-    } else if (phase == 1) {
-        for (int i = 0 ; i < 22 ; i++) {
-            ST7735_DrawPixel(Random32()%64, Random32()%160, ST7735_Color565(255,255,180));
-        }
-        for (int i = 0 ; i < 22 ; i++) {
-            ST7735_DrawPixel((Random32()%64)+64, Random32()%160, ST7735_Color565(255,255,180));
-        }
-    }
 
-}
 
-void DrawRoad() {
-    for (int i = 0 ; i < 128 ; i++) {
-        ST7735_Line(64, 0, i, 150, 0xFFFF);
-        ST7735_Line(i,150,i,160,0xFFFF);
-    }
-    //ST7735_FillRect(0,150,128,159,0xFFFF);
-}
-
-// known to work
-// color 0 = red, 1 = white
-void DrawSpike(int x, int y, int color) {
-    int height = y/6 + 1; // divisor is arbitrary. controls size of spike.
-    for (int i = y ; i < y+height * 1.4 ; i++) {
-        for (int j = x-(i-y)/2 ; j <= x+(i-y)/2 ; j++) {
-            if ((j-x)*(j-x) + (i-y-height/2)*(i-y-height/2) > height*height/2 && i >= y+height) continue;
-            if (color == 0) {
-                if (j<x - (i-y)/4) {
-                    ST7735_DrawPixel(j, i, ST7735_DARKRED);
-                } else if (j>x+(i-y)/4) {
-                    ST7735_DrawPixel(j, i, ST7735_LIGHTERRED);
-                } else {
-                    ST7735_DrawPixel(j, i, ST7735_LIGHTRED);
-                }
-            } else {
-                if (i-y > 5 && abs(j-x) < (i-y-5)/2) continue; // an attempt to refresh faster
-                ST7735_DrawPixel(j, i, ST7735_WHITE);
-            }
-
-        }
-    }
-
-}
-
-#define MAXSPIKES 20
+#define MAXSPIKES 7
+int spikeCount = 0;
 int spikeArray[MAXSPIKES][3]; // [spikeIndex][spikeExists?,X-trajectory,y-position]
 int putSpikeIndex = 0;
 
 void spawnSpike() {
+    spikeCount++;
     int xtrajectory = Random32()%128;
     spikeArray[putSpikeIndex][0] = 1;
     spikeArray[putSpikeIndex][1] = xtrajectory;
@@ -112,6 +66,9 @@ void spawnSpike() {
     putSpikeIndex %= MAXSPIKES;
 }
 
+// NOTE: If you set the spike speed high, DISABLE the spike refresh optimizer in DrawSprites.h
+// NOTE2: auto-disabled the refresh optimizer if speed > 2
+double spikeSpeed = 1;
 void moveSpikes() {
 
     // undraw old spikes, update spike array, and draw new spikes
@@ -126,11 +83,12 @@ void moveSpikes() {
         // update spike array
         if (currY > 160) {
             spikeArray[i][0] = 0;
+            spikeCount--;
             continue;
         }
 
         // draw new spikes
-        currY += 1 + currY/50;
+        currY += 1 + (currY*spikeSpeed/50.00);
         spikeArray[i][2] = currY;
         DrawSpike(64 + (currY * (trajectory - 64) / 160), currY, 0);
 
@@ -138,12 +96,27 @@ void moveSpikes() {
 
 }
 
+// global variables used by game engine
 int flag = 0;
 int prevplayerX = 0;
 int playerX = 0;
+int prevrelY = 0;
+int relativeY = 0;
+int yVel = 0;
 int switchin = 0;
 int LEDindex = 0;
-int LEDslowdown = 0;
+int slowdown = 0;
+int collided = 0;
+void detectCollisions() {
+    for (int i = 0 ; i < MAXSPIKES ; i++) {
+        int spiketraj = spikeArray[i][1];
+        int spikeY = spikeArray[i][2];
+        if (spikeArray[i][0] && spikeY >= 120 && spikeY <= 131 && relativeY<25 && abs(playerX+7-spiketraj) < 22) {
+            collided = 1;
+        }
+    }
+}
+
 // phase = 0; // 0 = welcome, 1 = gameplay, 2 = lose
 // GAME ENGINE
 // games  engine runs at 30Hz
@@ -156,16 +129,36 @@ void TIMG12_IRQHandler(void){uint32_t pos,msg;
     int slidepot = Sensor.In();
     // 2) read input switches
     switchin = Switch_In();
+    if (((switchin & 2) == 2) && (relativeY==0) && phase == 1) {
+        yVel = 10;
+        Sound_Jump();
+        relativeY = 1; // to get off ground
+    }
     // 3) move sprites
     prevplayerX = playerX;
-    playerX = slidepot/48 + 14;
+    prevrelY = relativeY;
+    if (relativeY==0) {
+        playerX = max(min(slidepot/48 + 14, prevplayerX+8), prevplayerX-8);
+        // playerX = max(slidepot/48 + 14, prevplayerX-8);
+    }
+    if (relativeY > 0) {
+        yVel--;
+    } else {
+        relativeY = 0; // fix to ground
+        yVel = 0;
+    }
+    relativeY += yVel;
+    relativeY = max(0,relativeY);
 
     // 4) start sounds
     // 5) set semaphore
     flag = 1;
 
+    // Collisions
+    detectCollisions();
+
     // LEDs
-    if (LEDslowdown++%5 == 0 && phase==0) LED_Toggle(LEDindex++%3);
+    if (slowdown++%5 == 0 && phase==0) LED_Toggle(LEDindex++%3);
 
     // NO LCD OUTPUT IN INTERRUPT SERVICE ROUTINES
     GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
@@ -190,11 +183,23 @@ const char Language_Klingon[]="Klingon ";
 const char Start_English[]="Press Up to Start \n               "; // make sure there are enough spaces to override
 const char Start_Italian[]="   Premi Su per   \n       Iniziare";
 const char Start_Klingon[]="      yIvum       \n               ";
-const char *Phrases[4][3]={
+const char End_English[]=  " You Lose! Retry? "; // make sure there are enough spaces to override
+const char End_Italian[]=  " Perdi! Riprovare?";
+const char End_Klingon[]=  "      idk         ";
+const char Score_English[]="       Score:     "; // make sure there are enough spaces to override
+const char Score_Italian[]="       Punto:     ";
+const char Score_Klingon[]="      idk         ";
+const char Highscore_English[]=  "    High Score:   "; // make sure there are enough spaces to override
+const char Highscore_Italian[]=  "  Punteggio alto: ";
+const char Highscore_Klingon[]=  "      idk:        ";
+const char *Phrases[7][3]={
   {Hello_English,Hello_Italian,Hello_Klingon},
   {Goodbye_English,Goodbye_Italian,Goodbye_Klingon},
   {Language_English,Language_Italian,Language_Klingon},
-  {Start_English,Start_Italian,Start_Klingon}
+  {Start_English,Start_Italian,Start_Klingon},
+  {End_English,End_Italian,End_Klingon},
+  {Score_English,Score_Italian,Score_Klingon},
+  {Highscore_English,Highscore_Italian,Highscore_Klingon}
 };
 // use main1 to observe special characters
 int main1(void){ // main1
@@ -318,10 +323,10 @@ int main4(void){ uint32_t last=0,now;
   while(1){
     now = Switch_In(); // one of your buttons
     if((last == 0)&&(now == 1)){
-      Sound_Shoot(); // call one of your sounds
+      Sound_Button(); // call one of your sounds
     }
     if((last == 0)&&(now == 2)){
-      Sound_Killed(); // call one of your sounds
+      Sound_Jump(); // call one of your sounds
     }
     if((last == 0)&&(now == 4)){
       Sound_Explosion(); // call one of your sounds
@@ -329,6 +334,7 @@ int main4(void){ uint32_t last=0,now;
     if((last == 0)&&(now == 8)){
       Sound_Fastinvader1(); // call one of your sounds
     }
+    last = now;
     // modify this to test all your sounds
   }
 }
@@ -391,7 +397,6 @@ void drawScore(int sc) {
 }
 
 
-
 // ALL ST7735 OUTPUT MUST OCCUR IN MAIN
 int main(void){ // final main
   __disable_irq();
@@ -411,6 +416,17 @@ int main(void){ // final main
   // initialize all data structures
   int score = 0;
   __enable_irq();
+
+
+  // TESTING
+  /*
+  ST7735_FillScreen(ST7735_YELLOW);
+  SmartFill(5,5,80,80);
+  */
+  int highscore = 0;
+
+  // the big overall loop
+  while(1){
 
   // Start screen. Phase 0
   phase = 0;
@@ -444,28 +460,100 @@ int main(void){ // final main
        // clear semaphore
       flag = 0;
        // update ST7735R
-      ST7735_DrawBitmap(playerX, 150, AlienMiddle, 15, 30);
-      if (Random32() % 30 == 0) spawnSpike();
+      ST7735_DrawBitmap(playerX, 150 - relativeY, AlienMiddle, 15, 30);
+      if (Random32() % (int)(30-3*spikeSpeed) == 0 && spikeCount<MAXSPIKES) {
+          spawnSpike();
+      }
       moveSpikes();
 
-      // draw player TODO: optimize
-      // idea: have the player's bitmap have wide white background. redraw the small black triangles
-      // over the white bitmap rather than redrawing the large road actually i don't like this idea!
-      // another idea: same as above but limit the white background to ±5 pixels on each side. Limit
-      // the player to move max 5 pixels per frame, so the 5 pixel margin is sufficient.
-      if (prevplayerX != playerX) {
+
+      // draw player : fine tuned to optimize refreshes
+      if (true || prevplayerX != playerX) {
           int vel = abs(prevplayerX - playerX)+3;
           //ST7735_FillRect(12, 121, 104, 34, 0xFFFF); // problematic tbh
-          if (playerX > prevplayerX) ST7735_FillRect(max(12,playerX-vel), 121, vel, 34, 0xFFFF);
-          if (playerX < prevplayerX) ST7735_FillRect(playerX+15, 121, min(vel,99-playerX), 34, 0xFFFF);
-          ST7735_DrawBitmap(playerX, 150, AlienMiddle, 15, 30);
+          if (playerX > prevplayerX) ST7735_FillRect(max(12,playerX-vel), 121-relativeY , vel, 34, ST7735_WHITE);
+          if (playerX < prevplayerX) ST7735_FillRect(playerX+15, 121-relativeY, min(vel,99-playerX), 34, ST7735_WHITE);
+
+          if (relativeY > 0) {
+              if (yVel<0) {
+                  SmartFill(prevplayerX-1, 150 - prevrelY - 30 - 2 + 2*yVel, 15+2, 11-2*yVel);
+                  SmartFill(max(12,playerX-vel), 150 - prevrelY - 30 - 2 + 2*yVel, vel, 34);
+              } else {
+                  ST7735_FillRect(prevplayerX-1, 150 - relativeY - 2, 15+2, 4+2*yVel, ST7735_WHITE);
+              }
+          } else {
+              if (prevrelY != 0) {
+                  SmartFill(prevplayerX-1, 150 - prevrelY - 30 - 9, 15+2, 14);
+                  // cleanup(); // too slow
+              }
+              ST7735_Line(prevplayerX-1, 150-31, prevplayerX+17, 150-31, ST7735_WHITE);
+          }
+
+          if (relativeY > 0) {
+              ST7735_DrawBitmap(playerX, 150 - prevrelY, AlienJump, 15, 30);
+          } else {
+              if (slowdown%(4*5)<5) {
+                  ST7735_DrawBitmap(playerX, 150 - prevrelY, AlienLeft, 15, 30);
+              } else if (slowdown%(4*5)<10) {
+                  ST7735_DrawBitmap(playerX, 150 - prevrelY, AlienMiddle, 15, 30);
+              } else if (slowdown%(4*5)<15) {
+                  ST7735_DrawBitmap(playerX, 150 - prevrelY, AlienRight, 15, 30);
+              } else {
+                  ST7735_DrawBitmap(playerX, 150 - prevrelY, AlienMiddle, 15, 30);
+              }
+          }
       }
 
-      // draw score TODO: make score increase every 5 frames not 1 using SysTick
-      score += 10;
+      // increase game difficulty
+      if (slowdown%100 == 20 && spikeSpeed<6) {
+          spikeSpeed*=1.14; // exponential growth with cap of 6
+      }
+
+      // draw score
+      score += (slowdown%5==0)?10:0;
       ST7735_SetCursor(0,0);
       drawScore(score);
 
     // check for end game or level switch
+      if (collided || (switchin&8)==8) {
+          break;
+      }
+      slowdown++;
+  }
+
+  // PHASE 2
+  // reset game data
+  spikeSpeed = 1;
+  LEDindex = 0;
+  phase = 2;
+  collided = 0;
+  for (int i = 0 ; i < MAXSPIKES ; i++) {
+      for (int j = 0 ; j< 3 ; j++) spikeArray[i][j] = 0;
+  }
+  spikeCount = 0;
+  highscore = max(score, highscore);
+
+  ST7735_FillScreen(ST7735_BLACK);
+  DrawStars();
+  DrawSpike(64, 10, 2);
+  // game over text
+    ST7735_SetCursor(2,6);
+    ST7735_OutString((char *)Phrases[4][langIndex]);
+    ST7735_SetCursor(2,10);
+    ST7735_OutString((char *)Phrases[5][langIndex]);
+    ST7735_SetCursor(9,11);
+    drawScore(score);
+    ST7735_SetCursor(2,13);
+    ST7735_OutString((char *)Phrases[6][langIndex]);
+    ST7735_SetCursor(9,14);
+    drawScore(highscore);
+    score = 0;
+
+  while (1) {
+      // wait for retry
+      if ((switchin&2)==2) break;
+  }
+  while ((switchin&2)==2){}; // wait for switch release
+  ST7735_FillScreen(ST7735_BLACK);
   }
 }
