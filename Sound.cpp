@@ -21,6 +21,7 @@
 #define DACBITS   31
 
 
+
 void SysTick_IntArm(uint32_t period, uint32_t priority){
     // write this
     SysTick->CTRL = 0;         // disable SysTick during setup
@@ -29,6 +30,10 @@ void SysTick_IntArm(uint32_t period, uint32_t priority){
     SCB->SHP[1] = (SCB->SHP[1]&(~0xC0000000))|(priority << 29); // priority 2 // 30??
     SysTick->CTRL = 0x07;      // enable SysTick with core clock and interrupts
 }
+
+
+
+
 // initialize a 11kHz SysTick, however no sound should be started
 // initialize any global variables
 // Initialize the 5 bit DAC
@@ -45,6 +50,10 @@ void Sound_Init(void){
 
     // initialize 5 bit DAC
     DAC5_Init();
+
+    // my code to attempt background music
+    // TimerG0_IntArm(20000,40,2); // 40MHz/40/200000 = 50Hz
+
 }
 extern "C" void SysTick_Handler(void);
 void SysTick_Handler(void){ // called at 11 kHz
