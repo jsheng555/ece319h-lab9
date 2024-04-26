@@ -35,7 +35,7 @@ void PLL_Init(void){ // set phase lock loop (PLL)
   Clock_Init80MHz(0);   // run this line for 80MHz
 }
 
-uint32_t M=1;
+uint32_t M=1235382;
 uint32_t Random32(void){
   M = 1664525*M+1013904223;
   return M;
@@ -50,6 +50,23 @@ SlidePot Sensor(1500,0); // copy calibration from Lab 7
 
 int phase = 0; // 0 = welcome, 1 = gameplay, 2 = lose
 
+// FSM stuff
+typedef struct State {
+    uint32_t out;
+    uint32_t time;
+    const struct State* next;
+} State;
+
+#define LEDS_ON &FSM[0]
+#define LEDS_OFF &FSM[1]
+/* the fsm table ahhhhh
+ * output  time  next states */
+ const State FSM[2] = {
+ {1  , 600  , LEDS_OFF},
+ {0  , 600  , LEDS_ON}
+ };
+// State* currentStatePointer = &FSM[0];
+
 
 #define BACKGROUNDMUSICSIZE 128
 #define MAXSPIKES 6
@@ -59,7 +76,7 @@ int putSpikeIndex = 0;
 
 void spawnSpike() {
     spikeCount++;
-    int xtrajectory = Random32()%128;
+    int xtrajectory = (Random32()>>17)%128;
     spikeArray[putSpikeIndex][0] = 1;
     spikeArray[putSpikeIndex][1] = xtrajectory;
     spikeArray[putSpikeIndex][2] = 1;
@@ -69,7 +86,7 @@ void spawnSpike() {
 
 // NOTE: If you set the spike speed high, DISABLE the spike refresh optimizer in DrawSprites.h
 // NOTE2: auto-disabled the refresh optimizer if speed > 1.6
-double spikeSpeed = 1.1;
+int spikeSpeed = 1;
 void moveSpikes() {
 
     // undraw old spikes, update spike array, and draw new spikes
@@ -89,7 +106,7 @@ void moveSpikes() {
         }
 
         // draw new spikes
-        currY += 1 + (currY*spikeSpeed/50.00);
+        currY += 1 + (currY*spikeSpeed)/50.00;
         spikeArray[i][2] = currY;
         DrawSpike(64 + (currY * (trajectory - 64) / 160), currY, 0);
 
@@ -158,10 +175,17 @@ void detectCollisions() {
     }
 }
 
+// turns on the motor for a given number of frames
+int motorTimer = 0;
+void motorDuration(int f) {
+    motorTimer = f;
+    GPIOB->DOUTSET31_0 = (1<<13);
+}
+
 // phase = 0; // 0 = welcome, 1 = gameplay, 2 = lose
 // GAME ENGINE
 // games  engine runs at 30Hz
-void TIMG12_IRQHandler(void){uint32_t pos,msg;
+void TIMG12_IRQHandler2(void){uint32_t pos,msg;
   if((TIMG12->CPU_INT.IIDX) == 1){ // this will acknowledge
     GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
     GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
@@ -205,8 +229,14 @@ void TIMG12_IRQHandler(void){uint32_t pos,msg;
     // Collisions
     detectCollisions();
 
+    // motor
+    if (phase == 1 && (Random32()>>20)%(360-spikeSpeed*25)==0 && motorTimer<=0) { // activates randomly ~15s on default, ~11s on max spike speed
+        motorDuration(30 + (Random32()>>22)%60); // starts a shake between 1-3 seconds
+    }
+    if (motorTimer--==0) GPIOB->DOUTCLR31_0 = (1<<13);
+
     // LEDs
-    if (slowdown++%5 == 0 && phase==0) LED_Toggle(LEDindex++%3);
+    if (slowdown%5 == 0 && phase==0) LED_Toggle(LEDindex++%3);
     oneSecond++;
     // NO LCD OUTPUT IN INTERRUPT SERVICE ROUTINES
     GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
@@ -233,8 +263,6 @@ void TIMG8_IRQHandler(void){
   if((TIMG8->CPU_INT.IIDX) == 1){ // this will acknowledge
     // GPIOB->DOUTTGL31_0 = (1<<27);   // toggle PB27
     DAC5_Out(SinWave[waveIndex++%32]);
-
-
   }
 }
 
@@ -245,9 +273,9 @@ typedef enum {HELLO, GOODBYE, LANGUAGE} phrase_t;
 const char Hello_English[] ="Hello";
 const char Hello_Italian[] ="Ciao";
 const char Hello_Klingon[] ="nuqneH";
-const char Goodbye_English[]="Goodbye";
-const char Goodbye_Italian[]="Arrivederci";
-const char Goodbye_Klingon[] = "idk";
+const char Nova_English[]="  NOVA";
+const char Nova_Italian[]="  NOVA";
+const char Nova_Klingon[]="puyjaq";
 const char Language_English[]="< English > "; // make sure there are enough spaces to override
 const char Language_Italian[]="< Italiano >";
 const char Language_Klingon[]="< Klingon > ";
@@ -257,15 +285,15 @@ const char Start_Klingon[]="      yIvum       \n               ";
 const char End_English[]=  " You Lose! Retry? "; // make sure there are enough spaces to override
 const char End_Italian[]=  " Perdi! Riprovare?";
 const char End_Klingon[]=  " qeylIS! nuqjatlh?";
-const char Score_English[]="       Score:     "; // make sure there are enough spaces to override
-const char Score_Italian[]="       Punto:     ";
-const char Score_Klingon[]="      pe''eg:     ";
-const char Highscore_English[]=  "    High Score:   "; // make sure there are enough spaces to override
-const char Highscore_Italian[]=  "  Punteggio alto: ";
-const char Highscore_Klingon[]=  "      Qapla':     ";
+const char Score_English[]="Score:";
+const char Score_Italian[]="Punto:";
+const char Score_Klingon[]="pe''eg:";
+const char Highscore_English[]=  "High Score:";
+const char Highscore_Italian[]=  "Punteggio alto:";
+const char Highscore_Klingon[]=  "Qapla':";
 const char *Phrases[7][3]={
   {Hello_English,Hello_Italian,Hello_Klingon},
-  {Goodbye_English,Goodbye_Italian,Goodbye_Klingon},
+  {Nova_English,Nova_Italian,Nova_Klingon},
   {Language_English,Language_Italian,Language_Klingon},
   {Start_English,Start_Italian,Start_Klingon},
   {End_English,End_Italian,End_Klingon},
@@ -475,7 +503,7 @@ void MusicOff() {
 }
 
 // ALL ST7735 OUTPUT MUST OCCUR IN MAIN
-int main(void){ // final main
+int main6(void){ // final main
   __disable_irq();
   PLL_Init(); // set bus speed
   LaunchPad_Init();
@@ -487,6 +515,8 @@ int main(void){ // final main
   Switch_Init(); // initialize switches
   LED_Init();    // initialize LED
   Sound_Init();  // initialize sound
+  GPIOB->DOE31_0 |= (1<<13); // initialize motor
+  IOMUX->SECCFG.PINCM[PB13INDEX] = 0x81; // intialize motor
   TExaS_Init(0,0,&TExaS_LaunchPadLogicPB27PB26); // PB27 and PB26
     // initialize interrupts on TimerG12 at 30 Hz
   TimerG12_IntArm(80000000/30,2);
@@ -496,11 +526,6 @@ int main(void){ // final main
   __enable_irq();
 
 
-  // TESTING
-  /*
-  ST7735_FillScreen(ST7735_YELLOW);
-  SmartFill(5,5,80,80);
-  */
   int highscore = 0;
 
   // the big overall loop
@@ -518,6 +543,7 @@ int main(void){ // final main
       // clear semaphore
       flag = 0;
       // game start?
+      Random32();
       if (switchin == 2) {
           ST7735_FillScreen(ST7735_BLACK);
           break; // move to phase 1
@@ -529,6 +555,7 @@ int main(void){ // final main
       }
       // language change?
       switchLanguage();
+      slowdown++;
   }
 
   // PHASE 1
@@ -537,7 +564,7 @@ int main(void){ // final main
 
   DrawStars();
   DrawRoad();
-  spikeSpeed = 1.1;
+  spikeSpeed = 1;
   slowdown = 0;
 
   while(1){
@@ -547,9 +574,11 @@ int main(void){ // final main
       flag = 0;
        // update ST7735R
       ST7735_DrawBitmap(playerX, 150 - relativeY, AlienMiddle, 15, 30);
-      if (Random32() % (int)(42-5*spikeSpeed) == 0 && spikeCount<MAXSPIKES) {
-          spawnSpike();
-      }
+//      if ((Random32() % (int)(42-4*spikeSpeed)) == 0 && spikeCount<MAXSPIKES) {
+//          spawnSpike();
+//      }
+      if (slowdown%(54-6*spikeSpeed) == 0 && spikeCount < MAXSPIKES) spawnSpike();
+      if ((Random32()>>24)%20 == 1 && spikeCount < MAXSPIKES) spawnSpike();
       moveSpikes();
 
 
@@ -591,14 +620,25 @@ int main(void){ // final main
       }
 
       // increase game difficulty
-      if (slowdown%120 == 0 && spikeSpeed<5.4) {
-          spikeSpeed += 0.25; // linear growth with cap of 5.4
+      if (slowdown%450 == 1 && spikeSpeed<8) {
+          spikeSpeed++; // linear growth with cap of 8
       }
 
       // draw score
       score += (slowdown%5==0)?10:0;
       ST7735_SetCursor(0,0);
       drawScore(score);
+
+      // draw supernova
+      if (motorTimer > 0) {
+          ST7735_SetCursor(14,0);
+          ST7735_SetTextColor(ST7735_RED);
+          ST7735_OutString((char *)Phrases[1][langIndex]);
+          ST7735_SetTextColor(ST7735_YELLOW);
+      } else if (motorTimer == 0) {
+          ST7735_SetCursor(14,0);
+          ST7735_OutString((char*)"      ");
+      }
 
     // check for end game or level switch
       if (collided) {
@@ -609,7 +649,7 @@ int main(void){ // final main
 
   // PHASE 2
   // reset game data
-  spikeSpeed = 1.1;
+  spikeSpeed = 1;
   LEDindex = 0;
   phase = 2;
   collided = 0;
@@ -618,6 +658,7 @@ int main(void){ // final main
   }
   spikeCount = 0;
   highscore = max(score, highscore);
+  GPIOB->DOUTCLR31_0 = (1<<13);
 
   // graphics
   ST7735_FillScreen(ST7735_BLACK);
@@ -626,11 +667,11 @@ int main(void){ // final main
   // game over text
     ST7735_SetCursor(2,6);
     ST7735_OutString((char *)Phrases[4][langIndex]);
-    ST7735_SetCursor(2,10);
+    ST7735_SetCursor(8,10);
     ST7735_OutString((char *)Phrases[5][langIndex]);
     ST7735_SetCursor(9,11);
     drawScore(score);
-    ST7735_SetCursor(2,13);
+    ST7735_SetCursor(6,13);
     ST7735_OutString((char *)Phrases[6][langIndex]);
     ST7735_SetCursor(9,14);
     drawScore(highscore);
@@ -644,9 +685,335 @@ int main(void){ // final main
           for (int i = 0 ; i < 3 ; i++) LED_Toggle(i);
       }
       slowdown++;
+
+
       if ((switchin&2)==2) break;
   }
   while ((switchin&2)==2){}; // wait for switch release
   ST7735_FillScreen(ST7735_BLACK);
   }
 }
+
+
+
+
+
+
+
+
+// TETRIS
+
+// global vars
+int8_t board[20][16];
+int8_t prevBoard[20][16];
+int tetrisSlow = 0;
+int DROPSPEED = 10; // number of frames between each y-drop
+int blockType = 0;
+int tetrisScore = 0;
+
+void resetTetris() {
+    for (int i = 0 ; i < 20 ; i++) {
+        for (int j = 0 ; j < 16 ; j++) {
+            board[i][j] = 0;
+            prevBoard[i][j] = 0;
+        }
+    }
+}
+
+void drawBoard() {
+    for (int row = 0 ; row < 20 ; row++) {
+        for (int col = 0 ; col < 16 ; col++) {
+            if (board[row][col] == 0) {
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_BLACK);
+            } else if (abs(board[row][col]) == 1) { // red
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_RED);
+            } else if (abs(board[row][col]) == 2) {
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_BLUE);
+            } else if (abs(board[row][col]) == 3) {
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_YELLOW);
+            } else if (abs(board[row][col]) == 4) {
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_GREEN);
+            } else if (abs(board[row][col]) == 5) {
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_MAGENTA);
+            } else if (abs(board[row][col]) == 6) {
+                ST7735_FillRect(col*8, row*8, 8, 8, ST7735_CYAN);
+            }
+        }
+    }
+}
+
+void generateRandomBlock() {
+    // gen new block
+  blockType = (Random32()>>24)%6; // change to match # of unique block types
+  if (blockType == 0) { // red square
+      board[0][8] = -1;
+      board[0][9] = -1;
+      board[1][8] = -1;
+      board[1][9] = -1;
+  }
+  if (blockType == 1) { // blue line
+      board[0][5] = -2;
+      board[0][6] = -2;
+      board[0][7] = -2;
+      board[0][8] = -2;
+  }
+  if (blockType == 2) { // yellow L
+    board[0][7] = -3;
+    board[1][7] = -3;
+    board[1][8] = -3;
+    board[1][9] = -3;
+  }
+  if (blockType == 3) { // green squiggle
+      board[0][7] = -4;
+      board[0][8] = -4;
+      board[1][8] = -4;
+      board[1][9] = -4;
+  }
+  if (blockType == 4) { // purple vertical line
+    board[0][8] = -5;
+    board[1][8] = -5;
+    board[2][8] = -5;
+    board[3][8] = -5;
+  }
+  if (blockType == 5) {
+      board[0][8] = -6;
+      board[1][8] = -6;
+      board[1][7] = -6;
+      board[2][7] = -6;
+  }
+}
+
+bool boardHasFallingBlock() {
+    for (int row = 0 ; row < 20 ; row++) {
+        for (int col = 0 ; col < 16 ; col++) {
+            if (board[row][col] < 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// attempts to rotate block CW. returns true if fails.
+bool rotateBlockCW() {
+    // copy array into previous
+    for (int i = 0 ; i < 20 ; i++) {
+        for (int j = 0 ; j < 16 ; j++) {
+            prevBoard[i][j] = board[i][j];
+        }
+    }
+    return false;
+}
+
+bool boardHasYCollision() {
+    for (int i = 19 ; i >=0 ; i--) { // 19-1=18
+        for (int j = 15 ; j >=0 ; j--) {
+            if (board[i][j] < 0 && (i==19 || board[i+1][j] > 0)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool boardHasLeftCollision() {
+    for (int i = 0 ; i < 20 ; i++) {
+        for (int j = 0 ; j < 16 ; j++) {
+            if (board[i][j] < 0) {
+                if (j==0) return true;
+                if (board[i][j-1]>0) return true;
+            }
+        }
+    }
+    return false;
+}
+bool boardHasRightCollision() {
+    for (int i = 0 ; i < 20 ; i++) {
+        for (int j = 0 ; j < 16 ; j++) {
+            if (board[i][j] < 0) {
+                if (j==15) return true;
+                if (board[i][j+1]>0) return true;
+            }
+        }
+    }
+    return false;
+}
+
+// clears completed rows
+void handleRowClear() {
+    for (int i = 1 ; i < 20 ; i++) {
+        bool fullRow = 1;
+        for (int j = 0 ; j < 16 ; j++) {
+            if (board[i][j] == 0) fullRow = 0;
+        }
+        if (fullRow) {
+            tetrisScore+=100;
+            for (int k = i-1 ; k >= 0 ; k--) {
+                for (int j = 0 ; j < 16 ; j++) {
+                    board[k+1][j] = board[k][j];
+                }
+            }
+        }
+    }
+}
+
+// checks for lose condition
+bool isLose() {
+    for (int c = 0 ; c < 16 ; c++) {
+        if (board[0][c] > 0) return true;
+    }
+    return false;
+}
+
+void TIMG12_IRQHandler(void){uint32_t pos,msg;
+  if((TIMG12->CPU_INT.IIDX) == 1){ // this will acknowledge
+    tetrisSlow++;
+    GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
+    GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
+// game engine goes here
+
+    // 1) sample slide pot
+    int slidepot = Sensor.In();
+    slidepot >>= 8;  // convert to tile
+    // 2) read input switches
+    switchin = Switch_In();
+
+
+    // move x pos
+    // find leftmost negative tile
+    int leftmostNegative = 999;
+    for (int j = 0 ; j < 16 ; j++) {
+        for (int i = 0 ; i < 20 ; i++) {
+            if (board[i][j] < 0) leftmostNegative = min(leftmostNegative,j);
+        }
+    }
+    // calculate diff between slidepot and tile
+    int shift = slidepot - leftmostNegative;
+    // shift grid
+    if (shift>0 && !boardHasRightCollision()) {
+        for (int i = 0 ; i < 20 ; i++) {
+            for (int j = 15 ; j >= 0 ; j--) {
+                if (board[i][j] < 0) {
+                    if (j+1 < 16) board[i][j+1] = board[i][j];
+                    board[i][j] = 0;
+                }
+            }
+        }
+    } else if (shift<0 && !boardHasLeftCollision()) {
+        for (int i = 0 ; i < 20 ; i++) {
+            for (int j = 0 ; j < 16 ; j++) {
+                if (board[i][j] < 0) {
+                    if (j-1 >= 0) board[i][j-1] = board[i][j];
+                    board[i][j] = 0;
+                }
+            }
+        }
+    }
+    // check for drop - not working
+    if (switchin == 8 && !boardHasYCollision()) {
+        for (int i = 18 ; i >=0 ; i--) { // 19-1=18
+            for (int j = 15 ; j >=0 ; j--) {
+                if (board[i][j]<0) {
+                    board[i+1][j] = board[i][j];
+                    board[i][j] = 0;
+                }
+            }
+        }
+    }
+    handleRowClear();
+
+    // stuff that occurs not every frame
+    if (tetrisSlow%DROPSPEED == 0) {
+        // 3) move sprites
+        // save/copy into prev board
+        for (int i = 0 ; i < 20 ; i++) {
+            for (int j = 0 ; j < 16 ; j++) prevBoard[i][j] = board[i][j];
+        }
+        // move all negative values down if no y-collision
+        if (!boardHasYCollision()) {
+            for (int i = 18 ; i >=0 ; i--) { // 19-1=18
+                for (int j = 15 ; j >=0 ; j--) {
+                    if (board[i][j]<0) {
+                        board[i+1][j] = board[i][j];
+                        board[i][j] = 0;
+                    }
+                }
+            }
+        } else { // settle block if y-collision
+            for (int i = 19 ; i >=0 ; i--) { // 19-1=18
+                for (int j = 15 ; j >=0 ; j--) {
+                    if (board[i][j]<0) {
+                        board[i][j] = abs(board[i][j]);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4) start sounds
+
+    // 5) set semaphore
+    flag = 1;
+
+    // NO LCD OUTPUT IN INTERRUPT SERVICE ROUTINES
+    GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
+  }
+}
+
+int main(void){ // final main 2
+  __disable_irq();
+  PLL_Init(); // set bus speed
+  LaunchPad_Init();
+  ST7735_InitPrintf();
+    //note: if you colors are weird, see different options for
+    // ST7735_InitR(INITR_REDTAB); inside ST7735_InitPrintf()
+  ST7735_FillScreen(ST7735_BLACK);
+  Sensor.Init(); // PB18 = ADC1 channel 5, slidepot
+  Switch_Init(); // initialize switches
+  LED_Init();    // initialize LED
+  Sound_Init();  // initialize sound
+  TExaS_Init(0,0,&TExaS_LaunchPadLogicPB27PB26); // PB27 and PB26
+    // initialize interrupts on TimerG12 at 30 Hz
+  TimerG12_IntArm(80000000/30,2);
+  TimerG8_IntArm(4000,1,2);
+  // initialize all data structures
+  int score = 0;
+  __enable_irq();
+
+  drawBoard();
+  tetrisScore = -10;
+
+  while (1) {
+      // wait for semaphore
+      while (flag == 0) {}
+      // clear semaphore
+      flag = 0;
+
+      if (!boardHasFallingBlock()) {
+          tetrisScore += 10;
+          generateRandomBlock();
+      }
+
+      drawBoard();
+
+      if (isLose()) {
+          resetTetris();
+          drawBoard(); // effectively clears screen
+          ST7735_SetCursor(2,7);
+          ST7735_OutString((char*)"You lose!");
+          ST7735_SetCursor(2,8);
+          ST7735_OutString((char*)"Score: ");
+          drawScore(tetrisScore);
+          ST7735_SetCursor(2,9);
+          ST7735_OutString((char*)"Press any button");
+          ST7735_SetCursor(2,10);
+          ST7735_OutString((char*)"to retry");
+          // wait for button press
+          while (switchin==0){}
+          drawBoard();
+      }
+  }
+
+
+}
+
