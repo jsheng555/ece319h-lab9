@@ -23,7 +23,7 @@ uint32_t Random(uint32_t n);
 int max(int a, int b);
 int min(int a, int b);
 extern int phase;
-extern double spikeSpeed;
+extern int spikeSpeed;
 
 
 // cleans up the edges of the screen after a jump

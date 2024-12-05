@@ -185,7 +185,7 @@ void motorDuration(int f) {
 // phase = 0; // 0 = welcome, 1 = gameplay, 2 = lose
 // GAME ENGINE
 // games  engine runs at 30Hz
-void TIMG12_IRQHandler2(void){uint32_t pos,msg;
+void TIMG12_IRQHandler(void){uint32_t pos,msg;
   if((TIMG12->CPU_INT.IIDX) == 1){ // this will acknowledge
     GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
     GPIOB->DOUTTGL31_0 = GREEN; // toggle PB27 (minimally intrusive debugging)
@@ -503,7 +503,7 @@ void MusicOff() {
 }
 
 // ALL ST7735 OUTPUT MUST OCCUR IN MAIN
-int main6(void){ // final main
+int main(void){ // final main
   __disable_irq();
   PLL_Init(); // set bus speed
   LaunchPad_Init();
@@ -696,7 +696,7 @@ int main6(void){ // final main
 
 
 
-
+/*
 
 
 
@@ -960,7 +960,7 @@ void TIMG12_IRQHandler(void){uint32_t pos,msg;
   }
 }
 
-int main(void){ // final main 2
+int main2(void){ // final main 2
   __disable_irq();
   PLL_Init(); // set bus speed
   LaunchPad_Init();
@@ -1017,3 +1017,4 @@ int main(void){ // final main 2
 
 }
 
+*/
